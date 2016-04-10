@@ -14,6 +14,7 @@ use Date::Parse;
 use POSIX qw(strftime);
 use Mojo::UserAgent;
 use Mojo::JSON qw(encode_json);
+use Regexp::Trie;
 
 # get your own credentials at https://dev.twitter.com/apps/new
 my $nt = Net::Twitter->new(
@@ -38,7 +39,8 @@ my $dater = sub {
 
 my %found;
 
-chdir 'results' if -d 'results';
+mkdir 'results', 0755 unless -d 'results';
+
 DAYS_AGO: foreach my $offset ( 0 .. 3 ) {
 	my $until = strftime( '%Y-%m-%d', localtime( time - $offset * 86400 ) );
 
@@ -54,7 +56,7 @@ DAYS_AGO: foreach my $offset ( 0 .. 3 ) {
 			} );
 
 		my $time = time;
-		open my $fh, '>:utf8', "${term}_${until}_${time}.json";
+		open my $fh, '>:utf8', "results/${term}_${until}_${time}.json";
 		print { $fh } encode_json( $r );
 		close $fh;
 
@@ -84,13 +86,21 @@ foreach my $url ( sort {
 		||
 	$found{$b}{title} <=> $found{$a}{title}
  		} keys %found ) {
+ 	my $today_file = $dater . "-results.txt"
 	my( $count, $title, $users ) = @{ $found{$url} }{ qw(count title users) };
 	say "$count: $url\n\t$title\n\t", join ' ', sort keys %$users;
+
+	open my $fh, '>:utf8', $today_file or do {
+		warn "Could not open $today_file: $!";
+		next;
+		};
+
+	say { $fh } "$count: $url\n\t$title\n\t", join ' ', sort keys %$users;
 	}
 
 sub last_location ( $url ) {
 	state $ua = Mojo::UserAgent->new;
-	state $kill_domains_re = kill_domains();
+	state $kill_domains_re = kill_domains_re();
 
 	while( 1 ) {
 		my $location = $ua->get( $url )->res->headers->header( 'Location' );
@@ -118,44 +128,115 @@ sub last_location ( $url ) {
 	return [ $url, $title ];
 	}
 
-sub kill_domains {
-	my $str = join '|', qw(
-			hostwinds.com
-			kinkstew.com
-			kloud51.com
-			ampps.com
-			bullhornreach.com
-			whorecircus.com
-			kinkydistrict.com
-			tittypies.com
-			pornpeacock.com
-			houseofthewicked.com
-			usfreedomarmy.com
-			ziprecruiter.com
-			gekoo.co
-			force.com
-			jobviewtrack.com
-			ebid.net
-			freelancer.com
-			careerjet.co.in
-			spanjobs.com
-			findmjob.com
-			playboy.com
-			satriani.com
-			greenwhore.com
-			untappd.com
-			);
+BEGIN {
+my %killed;
+my $file = 'killed_domains.txt';
 
-	qr{ (?:$str) \z }xi;
+sub killed_domains_re () {
+	my $rt = Regexp::Trie->new;
+	foreach ( killed_domains() ) {
+		$rt->add($_);
+		}
+
+	$rt->regexp
+	}
+
+sub killed_domains () {
+	keys %killed
+	}
+
+sub load_killed_domain_list () {
+	open my $fh, '<:utf8', $file or do {
+		warn "Could not open $file: $!\n";
+		return;
+		};
+
+	while( <$fh> ) {
+		my @domains = grep /\S/, split;
+		$killed{ $_ }++ foreach @domains;
+		}
+	}
+
+sub add_to_killed_domain_list {
+	foreach ( @_ ) {
+		$killed{ $_ }++
+		}
+	}
+
+sub save_killed_domain_list () {
+	open my $fh, '>:utf8', $file or do {
+		warn "Could not open $file: $!\n";
+		return;
+		};
+
+	foreach ( keys %killed ) {
+		say $fh $_;
+		}
+
+	close $fh;
+	}
+
+sub killed_domain ( $domain ) {
+	return $killed{$domain};
+	}
+
+load_killed_domain_list();
+END { save_killed_domain_list() }
+}
+
+
+BEGIN {
+my %killed;
+my $file = 'killed_users.txt';
+
+sub killed_users () {
+	keys %killed
+	}
+
+sub load_killed_user_list () {
+	open my $fh, '<:utf8', $file or do {
+		warn "Could not open $file: $!\n";
+		return;
+		};
+
+	while( <$fh> ) {
+		my @users = grep /\S/, split;
+		$killed{ $_ }++ foreach @users;
+		}
+	}
+
+sub add_to_killed_user_list {
+	foreach ( @_ ) {
+		next if exists $killed{ $_ };
+		$killed{ $_ }++;
+		my $user = eval { $nt->create_block( { screen_name => $_ } ) };
+		if( $@ ) {
+			say "Error blocking $_!";
+			}
+		}
+	}
+
+sub save_killed_user_list () {
+	open my $fh, '>:utf8', $file or do {
+		warn "Could not open $file: $!\n";
+		return;
+		};
+
+	foreach ( keys %killed ) {
+		say $fh $_;
+		}
+
+	close $fh;
 	}
 
 sub killed_user ( $user ) {
-	return grep { $user eq $_ } qw(
-		briandfoy_perl
-		JobloreUK
-		KaceyOneill
-		);
+	return $killed{$user};
 	}
+
+load_killed_user_list();
+END { save_killed_user_list() }
+}
+
 
 __END__
 
