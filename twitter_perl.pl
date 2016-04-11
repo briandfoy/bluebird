@@ -41,7 +41,9 @@ my %found;
 
 mkdir 'results', 0755 unless -d 'results';
 
-DAYS_AGO: foreach my $offset ( 0 .. 3 ) {
+my $days_back = $ARGV[0] // 1;
+
+DAYS_AGO: foreach my $offset ( 0 .. $days_back ) {
 	my $until = strftime( '%Y-%m-%d', localtime( time - $offset * 86400 ) );
 
 	TERM: foreach my $term ( @ARGV ) {
@@ -61,7 +63,7 @@ DAYS_AGO: foreach my $offset ( 0 .. 3 ) {
 		close $fh;
 
 		STATUS: foreach my $status ( $r->{statuses}->@* ) {
-			next STATUS if killed_user( $status->{user} );
+			next STATUS if killed_user( $status->{user}{screen_name} );
 
 			my $date = $dater->( $status->{created_at} );
 			my @urls = map {
@@ -86,7 +88,7 @@ foreach my $url ( sort {
 		||
 	$found{$b}{title} <=> $found{$a}{title}
  		} keys %found ) {
- 	my $today_file = $dater . "-results.txt"
+ 	my $today_file = $dater->() . "-results.txt";
 	my( $count, $title, $users ) = @{ $found{$url} }{ qw(count title users) };
 	say "$count: $url\n\t$title\n\t", join ' ', sort keys %$users;
 
@@ -100,7 +102,7 @@ foreach my $url ( sort {
 
 sub last_location ( $url ) {
 	state $ua = Mojo::UserAgent->new;
-	state $kill_domains_re = kill_domains_re();
+	state $kill_domains_re = killed_domains_re();
 
 	while( 1 ) {
 		my $location = $ua->get( $url )->res->headers->header( 'Location' );
@@ -116,7 +118,7 @@ sub last_location ( $url ) {
 	my( $domain ) = $url->host =~ m/([^.]+ \. [^.]+) \z/x;
 	# say "$url -> $domain";
 	if( $domain =~ $kill_domains_re ) {
-		# say "\tkilled domain";
+		say "\tkilled domain => $domain";
 		return;
 		}
 
@@ -230,7 +232,8 @@ sub save_killed_user_list () {
 	}
 
 sub killed_user ( $user ) {
-	return $killed{$user};
+	# say "\tChecking $user => " . exists $killed{$user};
+	return exists $killed{$user};
 	}
 
 load_killed_user_list();
